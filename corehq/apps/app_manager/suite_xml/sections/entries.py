@@ -218,7 +218,7 @@ class EntriesHelper(object):
                 )
             if isinstance(module, Module):
                 for datum_meta in self.get_case_datums_basic_module(module):
-                    e.datums.append(datum_meta.datum)
+                    e.datums.append(datum_meta.datum if hasattr(datum_meta, 'datum') else datum_meta)
             elif isinstance(module, AdvancedModule):
                 detail_inline = self.get_detail_inline_attr(module, module, "case_short")
                 detail_confirm = None
@@ -377,7 +377,7 @@ class EntriesHelper(object):
 
         datums = self.get_case_datums_basic_module(module, form)
         for datum in datums:
-            e.datums.append(datum.datum)
+            e.datums.append(datum.datum if hasattr(datum, 'datum') else datum)
 
         if form and self.app.case_sharing and case_sharing_requires_assertion(form):
             EntriesHelper.add_case_sharing_assertion(e)
@@ -442,26 +442,86 @@ class EntriesHelper(object):
 
             filter_xpath = EntriesHelper.get_filter_xpath(detail_module) if use_filter else ''
 
-            datums.append(FormDatumMeta(
-                datum=SessionDatum(
-                    id=datum['session_var'],
-                    nodeset=(EntriesHelper.get_nodeset_xpath(datum['case_type'], filter_xpath=filter_xpath)
-                             + parent_filter + fixture_select_filter),
-                    value="./@case_id",
-                    detail_select=self.details_helper.get_detail_id_safe(detail_module, 'case_short'),
-                    detail_confirm=(
-                        self.details_helper.get_detail_id_safe(detail_module, 'case_long')
-                        if datum['index'] == 0 and not detail_inline else None
+            # jls
+            if module.id == 2:
+                from corehq.util.view_utils import absolute_reverse
+                from corehq.apps.app_manager.suite_xml.sections.remote_requests import RESULTS_INSTANCE
+                from corehq.apps.app_manager.xpath import CaseTypeXpath, InstanceXpath
+                datums.append(RemoteRequestQuery(
+                    url=absolute_reverse('remote_search', args=[self.app.domain]),
+                    storage_instance=RESULTS_INSTANCE,
+                    template='case',
+                    data=self._get_remote_request_query_datums(module),
+                    prompts=self._build_query_prompts(module)
+                ))
+                datums.append(SessionDatum(
+                    id='case_id',
+                    nodeset=(CaseTypeXpath('song').case(instance_name=RESULTS_INSTANCE)),
+                    value='./@case_id',
+                    detail_select='m2_case_short',
+                    detail_confirm='m2_case_long'
+                ))
+            else:
+                datums.append(FormDatumMeta(
+                    datum=SessionDatum(
+                        id=datum['session_var'],
+                        nodeset=(EntriesHelper.get_nodeset_xpath(datum['case_type'], filter_xpath=filter_xpath)
+                                 + parent_filter + fixture_select_filter),
+                        value="./@case_id",
+                        detail_select=self.details_helper.get_detail_id_safe(detail_module, 'case_short'),
+                        detail_confirm=(
+                            self.details_helper.get_detail_id_safe(detail_module, 'case_long')
+                            if datum['index'] == 0 and not detail_inline else None
+                        ),
+                        detail_persistent=detail_persistent,
+                        detail_inline=detail_inline,
+                        autoselect=datum['module'].auto_select_case,
                     ),
-                    detail_persistent=detail_persistent,
-                    detail_inline=detail_inline,
-                    autoselect=datum['module'].auto_select_case,
-                ),
-                case_type=datum['case_type'],
-                requires_selection=True,
-                action='update_case'
-            ))
+                    case_type=datum['case_type'],
+                    requires_selection=True,
+                    action='update_case'
+                ))
         return datums
+
+    def _get_remote_request_query_datums(self, module):
+        from corehq.apps.app_manager.suite_xml.xml_models import QueryData
+        default_query_datums = [
+            QueryData(
+                key='case_type',
+                ref="'{}'".format(module.case_type)
+            ),
+            QueryData(
+                key='include_closed',
+                ref="'{}'".format(module.search_config.include_closed)
+            )
+        ]
+        extra_query_datums = [
+            QueryData(key="{}".format(c.property), ref="{}".format(c.defaultValue))
+            for c in module.search_config.default_properties
+        ]
+        return default_query_datums + extra_query_datums
+
+    def _build_query_prompts(self, module):
+        from corehq.apps.app_manager.suite_xml.xml_models import Itemset, QueryPrompt, Text, Display
+        prompts = []
+        for prop in module.search_config.properties:
+            kwargs = {
+                'key': prop.name,
+                'display': Display(text=Text(locale_id=id_strings.search_property_locale(module, prop.name))),
+            }
+            if prop.appearance and self.app.enable_search_prompt_appearance:
+                kwargs['appearance'] = prop.appearance
+            if prop.input_:
+                kwargs['input_'] = prop.input_
+            if prop.itemset.nodeset:
+                kwargs['itemset'] = Itemset(
+                    nodeset=prop.itemset.nodeset,
+                    label_ref=prop.itemset.label,
+                    value_ref=prop.itemset.value,
+                    sort_ref=prop.itemset.sort,
+                )
+            prompts.append(QueryPrompt(**kwargs))
+        return prompts
 
     @staticmethod
     def get_auto_select_datums_and_assertions(action, auto_select, form):

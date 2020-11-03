@@ -215,7 +215,7 @@ class MenuContributor(SuiteContributorByModule):
                 form_datums = self.entries_helper.get_datums_meta_for_form_generic(form)
                 var_name = next(
                     meta.datum.id for meta in reversed(form_datums)
-                    if meta.action and meta.requires_selection
+                    if hasattr(meta, 'action') and meta.action and meta.requires_selection
                 )
                 case = CaseIDXPath(session_var(var_name)).case()
             else:

@@ -150,7 +150,7 @@ class DetailContributor(SectionContributor):
             if len(d.details):
                 helper = EntriesHelper(self.app)
                 datums = helper.get_datum_meta_module(module)
-                d.variables.extend([DetailVariable(name=datum.datum.id, function=datum.datum.value) for datum in datums])
+                d.variables.extend([DetailVariable(name=datum.datum.id, function=datum.datum.value) for datum in datums if hasattr(datum, 'datum')])
                 return d
             else:
                 return None
