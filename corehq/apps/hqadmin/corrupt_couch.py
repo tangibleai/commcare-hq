@@ -122,7 +122,7 @@ def iter_missing_ids(domain, doc_name="ALL", date_range=None, couch_port=15984):
             itr = _iter_missing_ids(db, doc_type, domain_name, dates, view, couch_port)
             try:
                 for rec in itr:
-                    yield doc_type, rec
+                    yield doc_type, rec["missing"]
             finally:
                 itr.discard_state()
 
@@ -175,7 +175,9 @@ def _iter_missing_ids(db, doc_type, domain, date_range, view, couch_port, chunk_
         missing_results = find_missing_view_results(get_doc_ids, databases)
         if not last_results:
             return []
-        return [missing_results]
+        last_result = min(last_results, key=key)
+        last_result["missing"] = missing_results
+        return [last_result]
 
     if view is not None:
         view_name = view
