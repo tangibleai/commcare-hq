@@ -6,6 +6,7 @@ from urllib.parse import urljoin, urlparse, urlunparse
 
 import attr
 from couchdbkit import Database
+from django.conf import settings
 
 from auditcare.models import AuditEvent
 from casexml.apps.case.models import CommCareCase
@@ -148,18 +149,11 @@ def _get_couch_node_databases(db, node_port):
     membership = resp.json()
     nodes = [node.split("@")[1] for node in membership["cluster_nodes"]]
 
-    parsed_url = urlparse(db.uri)
+    parsed_url = urlparse(settings.COUCH_DATABASE)._replace(path=f"/{db.dbname}")
     auth = parsed_url.netloc.split('@')[0]
 
     return [
-        Database(urlunparse((
-            parsed_url.scheme,
-            f'{auth}@{node}:{node_port}',
-            parsed_url.path,
-            parsed_url.params,
-            parsed_url.query,
-            parsed_url.fragment
-        )))
+        Database(urlunparse(parsed_url._replace(netloc=f'{auth}@{node}:{node_port}')))
         for node in nodes
     ]
 
