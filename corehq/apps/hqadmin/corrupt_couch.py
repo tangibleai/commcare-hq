@@ -2,19 +2,20 @@
 import logging
 from collections import defaultdict
 from itertools import chain
+from urllib.parse import urljoin, urlparse, urlunparse
 
 import attr
+from couchdbkit import Database
 
 from auditcare.models import AuditEvent
 from casexml.apps.case.models import CommCareCase
-from couchforms.models import XFormInstance
-from dimagi.utils.parsing import json_format_datetime
-
 from corehq.apps.app_manager.models import Application
-from corehq.apps.users.models import CommCareUser
 from corehq.apps.domain.models import Domain
+from corehq.apps.users.models import CommCareUser
 from corehq.util.couch_helpers import NoSkipArgsProvider
 from corehq.util.pagination import ResumableFunctionIterator
+from couchforms.models import XFormInstance
+from dimagi.utils.parsing import json_format_datetime
 
 log = logging.getLogger(__name__)
 DOC_TYPES_BY_NAME = {
@@ -79,22 +80,20 @@ DOC_TYPES_BY_NAME = {
 
 def count_missing_ids(*args):
     def log_result(rec):
-        log.info(
-            f"  {rec.doc_type}: missing={len(rec.missing)} "
-            f"tries=(avg: {rec.avg_tries}, max: {rec.max_tries})"
-        )
+        for uri, missing in rec.missing.items():
+            log.info(f"  {rec.doc_type}, {uri}: {len(missing)}")
 
-    doc_type = None
     rec = None
     results = defaultdict(Result)
-    for doc_type, (missing, tries) in iter_missing_ids(*args):
+    for doc_type, missing_by_db in iter_missing_ids(*args):
         if rec and doc_type != rec.doc_type:
             log_result(rec)
             results.pop(doc_type, None)
         rec = results[doc_type]
         rec.doc_type = doc_type
-        rec.missing.update(missing)
-        rec.tries.append(tries)
+        for uri, new_missing in missing_by_db:
+            missing = rec.missing.get(uri, set())
+            rec.missing[uri] = missing | new_missing
     if rec:
         log_result(rec)
     else:
@@ -104,19 +103,10 @@ def count_missing_ids(*args):
 @attr.s
 class Result:
     doc_type = attr.ib(default=None)
-    missing = attr.ib(factory=set)
-    tries = attr.ib(factory=list)
-
-    @property
-    def max_tries(self):
-        return max(self.tries) if self.tries else 0
-
-    @property
-    def avg_tries(self):
-        return round(sum(self.tries) / len(self.tries), 2) if self.tries else 0
+    missing = attr.ib(factory=dict)
 
 
-def iter_missing_ids(domain, doc_name="ALL", date_range=None):
+def iter_missing_ids(domain, doc_name="ALL", date_range=None, couch_port=15984):
     if doc_name == "ALL":
         groups = DOC_TYPES_BY_NAME
     else:
@@ -128,10 +118,10 @@ def iter_missing_ids(domain, doc_name="ALL", date_range=None):
         domain_name = domain if group.get("use_domain") else None
         view = group.get("view")
         for doc_type in get_doc_types(group):
-            itr = _iter_missing_ids(db, doc_type, domain_name, dates, view)
+            itr = _iter_missing_ids(db, doc_type, domain_name, dates, view, couch_port)
             try:
                 for rec in itr:
-                    yield doc_type, rec["missing_and_tries"]
+                    yield doc_type, rec
             finally:
                 itr.discard_state()
 
@@ -152,10 +142,33 @@ def get_doc_types(group):
     return group.get("doc_types", [None])
 
 
-def _iter_missing_ids(db, doc_type, domain, date_range, view, chunk_size=1000):
+def _get_couch_node_databases(db, node_port):
+    resp = db.server._request_session.get(urljoin(db.server.uri, '/_membership'))
+    resp.raise_for_status()
+    membership = resp.json()
+    nodes = [node.split("@")[1] for node in membership["cluster_nodes"]]
+
+    parsed_url = urlparse(db.uri)
+    auth = parsed_url.netloc.split('@')[0]
+
+    return [
+        Database(urlunparse((
+            parsed_url.scheme,
+            f'{auth}@{node}:{node_port}',
+            parsed_url.path,
+            parsed_url.params,
+            parsed_url.query,
+            parsed_url.fragment
+        )))
+        for node in nodes
+    ]
+
+
+def _iter_missing_ids(db, doc_type, domain, date_range, view, couch_port, chunk_size=1000):
+
     def data_function(**view_kwargs):
-        def get_doc_ids():
-            results = list(db.view(view_name, **view_kwargs))
+        def get_doc_ids(database=db):
+            results = list(database.view(view_name, **view_kwargs))
             if results:
                 last_results.append(results[-1])
             return {key(r) for r in results}
@@ -163,15 +176,12 @@ def _iter_missing_ids(db, doc_type, domain, date_range, view, chunk_size=1000):
         def key(result):
             return tuple(result["key"]) + (result["id"],)
 
+        databases = _get_couch_node_databases(db, couch_port)
+        missing_results = find_missing_view_results(get_doc_ids, databases)
         last_results = []
-        missing, tries = find_missing_ids(get_doc_ids)
         if not last_results:
             return []
-        last_result = min(last_results, key=key)
-        last_key = key(last_result)
-        missing = {m[-1] for m in missing if m <= last_key}
-        last_result["missing_and_tries"] = missing, tries
-        return [last_result]
+        return [missing_results]
 
     if view is not None:
         view_name = view
@@ -212,30 +222,15 @@ def _iter_missing_ids(db, doc_type, domain, date_range, view, chunk_size=1000):
     return ResumableFunctionIterator(resume_key, data_function, args_provider, item_getter=None)
 
 
-def find_missing_ids(get_doc_ids, min_tries=5, limit=100):
-    """Find missing ids
-
-    Given a function that is expected to always return the same set of
-    unique ids, find all ids that are missing from some result sets.
-
-    Returns a tuple `(missing_ids, tries)
-    """
-    min_tries -= 1
-    missing = set()
-    all_ids = set()
-    no_news = 0
-    for tries in range(limit):
-        next_ids = get_doc_ids()
-        if all_ids:
-            miss = next_ids ^ all_ids
-            if any(x not in missing for x in miss):
-                no_news = 0
-                missing.update(miss)
-                all_ids.update(miss)
-        else:
-            all_ids.update(next_ids)
-        if no_news > min_tries:
-            return missing, tries + 1
-        no_news += 1
-    log.warning("still finding new missing docs after 100 queries")
-    return missing, 100
+def find_missing_view_results(get_view_results, databases):
+    """Find view results that are missing on each database"""
+    db_results = {db.uri: set(get_view_results(db)) for db in databases}
+    missing = {}
+    for uri, results in db_results.items():
+        all_others = set().union(*[
+            other_results
+            for other_uri, other_results in db_results.items()
+            if uri != other_uri
+        ])
+        missing[uri] = all_others - results
+    return missing

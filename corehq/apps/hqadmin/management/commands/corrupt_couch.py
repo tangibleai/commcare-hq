@@ -1,6 +1,6 @@
 import logging
-from dateutil.parser import parse as parse_date
 
+from dateutil.parser import parse as parse_date
 from django.core.management.base import BaseCommand
 
 from ...corrupt_couch import count_missing_ids, DOC_TYPES_BY_NAME
@@ -17,9 +17,10 @@ class Command(BaseCommand):
         parser.add_argument('domain')
         parser.add_argument('doc_name', choices=list(DOC_TYPES_BY_NAME) + ["ALL"])
         parser.add_argument('--date-range', help="YYYY-MM-DD..YYYY-MM-DD or 'ALL'")
+        parser.add_argument('--couch_port', type=int, default=15984)
         parser.add_argument('--verbose', action="store_true")
 
-    def handle(self, command, domain, doc_name=None, date_range=None, **options):
+    def handle(self, command, domain, doc_name=None, date_range=None, couch_port=15984, **options):
         setup_logging(options["verbose"])
         if date_range is None:
             date_range = (START, END)
@@ -27,7 +28,7 @@ class Command(BaseCommand):
             start, end = date_range.split("..")
             date_range = parse_date(start), parse_date(end)
         if command == "count-missing":
-            count_missing_ids(domain, doc_name, date_range)
+            count_missing_ids(domain, doc_name, date_range, couch_port)
         else:
             raise NotImplementedError
 

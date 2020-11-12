@@ -1,21 +1,24 @@
+from collections import namedtuple
+
 from testil import eq
 
-from ..corrupt_couch import find_missing_ids
+from ..corrupt_couch import find_missing_view_results
 
 
-def test_find_missing_ids():
-    def test(result_sets, expected_missing, expected_tries):
-        def get_ids():
-            while len(results) > 1:
-                return results.pop()
-            return results[0]
+def test_find_missing_view_results():
+    DB = namedtuple("DB", "uri")
 
-        results = list(reversed(result_sets))
-        missing, tries = find_missing_ids(get_ids)
-        eq(missing, expected_missing)
-        eq(tries, expected_tries)
+    def test(result_sets, expected):
+        assert len(result_sets) == len(expected)
 
-    yield test, [{1, 2}], set(), 6
-    yield test, [{1, 2}, {1, 3}, {2, 3}], {1, 2, 3}, 8
-    yield test, [{1, 2}, {1, 3}, {1, 3}, {1, 3}, {1, 3}, {2, 3}], {1, 2, 3}, 11
-    yield test, [{1, 2}] + [{1, 3}] * 6 + [{2, 3}], {2, 3}, 7
+        def get_ids(db):
+            return result_sets[db.uri]
+
+        dbs = [DB(i) for i, _ in enumerate(expected)]
+        expected = {i: exp for i, exp in enumerate(expected)}
+        missing_results = find_missing_view_results(get_ids, dbs)
+        eq(missing_results, expected)
+
+    yield test, [{1, 2}, {1, 2}], [set(), set()]
+    yield test, [{1, 2}, {1, 3}, {2, 4}], [{3, 4}, {2, 4}, {1, 3}]
+    yield test, [{1, 2}, {2, 3}, {1, 2, 3, 4}], [{3, 4}, {1, 4}, set()]
