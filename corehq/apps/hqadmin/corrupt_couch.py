@@ -81,8 +81,8 @@ DOC_TYPES_BY_NAME = {
 
 def count_missing_ids(*args):
     def log_result(rec):
-        for uri, missing in rec.missing.items():
-            log.info(f"  {rec.doc_type}, {uri}: {len(missing)}")
+        for node, missing in rec.missing.items():
+            log.info(f"  {rec.doc_type}, {node}: {len(missing)}")
 
     rec = None
     results = defaultdict(Result)
@@ -92,9 +92,9 @@ def count_missing_ids(*args):
             results.pop(doc_type, None)
         rec = results[doc_type]
         rec.doc_type = doc_type
-        for uri, new_missing in missing_by_db:
-            missing = rec.missing.get(uri, set())
-            rec.missing[uri] = missing | new_missing
+        for db, new_missing in missing_by_db.items():
+            missing = rec.missing.get(db.server.uri, set())
+            rec.missing[db.server.uri] = missing | new_missing
     if rec:
         log_result(rec)
     else:
@@ -159,6 +159,7 @@ def _get_couch_node_databases(db, node_port):
 
 
 def _iter_missing_ids(db, doc_type, domain, date_range, view, couch_port, chunk_size=1000):
+    databases = _get_couch_node_databases(db, couch_port)
 
     def data_function(**view_kwargs):
         def get_doc_ids(database=db):
@@ -171,7 +172,6 @@ def _iter_missing_ids(db, doc_type, domain, date_range, view, couch_port, chunk_
             return tuple(result["key"]) + (result["id"],)
 
         last_results = []
-        databases = _get_couch_node_databases(db, couch_port)
         missing_results = find_missing_view_results(get_doc_ids, databases)
         if not last_results:
             return []
@@ -220,13 +220,13 @@ def _iter_missing_ids(db, doc_type, domain, date_range, view, couch_port, chunk_
 
 def find_missing_view_results(get_view_results, databases):
     """Find view results that are missing on each database"""
-    db_results = {db.uri: set(get_view_results(db)) for db in databases}
+    db_results = {db: get_view_results(db) for db in databases}
     missing = {}
-    for uri, results in db_results.items():
+    for db, results in db_results.items():
         all_others = set().union(*[
             other_results
-            for other_uri, other_results in db_results.items()
-            if uri != other_uri
+            for other_db, other_results in db_results.items()
+            if db != other_db
         ])
-        missing[uri] = all_others - results
+        missing[db] = all_others - results
     return missing

@@ -14,9 +14,8 @@ def test_find_missing_view_results():
         def get_ids(db):
             return result_sets[db.uri]
 
-        dbs = [DB(i) for i, _ in enumerate(expected)]
-        expected = {i: exp for i, exp in enumerate(expected)}
-        missing_results = find_missing_view_results(get_ids, dbs)
+        expected = {DB(i): exp for i, exp in enumerate(expected)}
+        missing_results = find_missing_view_results(get_ids, list(expected))
         eq(missing_results, expected)
 
     yield test, [{1, 2}, {1, 2}], [set(), set()]
