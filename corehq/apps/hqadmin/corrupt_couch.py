@@ -170,9 +170,9 @@ def _iter_missing_ids(db, doc_type, domain, date_range, view, couch_port, chunk_
         def key(result):
             return tuple(result["key"]) + (result["id"],)
 
+        last_results = []
         databases = _get_couch_node_databases(db, couch_port)
         missing_results = find_missing_view_results(get_doc_ids, databases)
-        last_results = []
         if not last_results:
             return []
         return [missing_results]
