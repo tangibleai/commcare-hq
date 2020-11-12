@@ -215,7 +215,38 @@ def _iter_missing_ids(db, doc_type, domain, date_range, view, couch_port, chunk_
         'include_docs': False,
         'reduce': False,
     })
+
     return ResumableFunctionIterator(resume_key, data_function, args_provider, item_getter=None)
+
+def get_missing_ids(db, doc_type, domain, date_range, couch_port):
+    view_name = 'by_domain_doc_type_date/view'
+    start, end = date_range
+    startkey = [domain, doc_type, json_format_datetime(start)]
+    endkey = [domain, doc_type, json_format_datetime(end)]
+
+    def get_view_results(db):
+        ret = {
+            res["id"]
+            for res in db.view(view_name, startkey=startkey, endkey=endkey, include_docs=False, reduce=False)
+        }
+        l = list(ret)
+        print(db.server.uri, len(ret), l[0], l[-1])
+        return ret
+
+    databases = _get_couch_node_databases(db, couch_port)
+    missing_by = {}
+    counts = {}
+    last_count = None
+    while last_count != counts:
+        last_count = {k: len(v) for k, v in missing_by.items()}
+        missing_by_db = find_missing_view_results(get_view_results, databases)
+        print({k: len(v) for k, v in missing_by_db.items()})
+        for db, new_missing in missing_by_db.items():
+            missing = missing_by.get(db, set())
+            missing_by[db] = missing | new_missing
+    counts = {k: len(v) for k, v in missing_by.items()}
+    print(last_count)
+    print(counts)
 
 
 def find_missing_view_results(get_view_results, databases):
