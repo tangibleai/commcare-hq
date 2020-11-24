@@ -16,7 +16,10 @@ class CaseDbCacheSQL(AbstractCaseDbCache):
 
     def _validate_case(self, case):
         if self.domain and case.domain != self.domain:
-            raise IllegalCaseId("Bad case id")
+            raise IllegalCaseId(
+                f"Case [{case.case_id}] in domain '{case.domain}' "
+                f"cannot be referenced by domain '{self.domain}'"
+            )
         elif case.is_deleted:
             if not self.deleted_ok:
                 raise IllegalCaseId("Case [%s] is deleted " % case.case_id)
