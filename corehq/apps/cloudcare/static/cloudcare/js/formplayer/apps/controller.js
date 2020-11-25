@@ -52,6 +52,9 @@ hqDefine("cloudcare/js/formplayer/apps/controller", function () {
             settings.push(
                 new Backbone.Model({ slug: slugs.CLEAR_USER_DATA })
             );
+            settings.push(
+                new Backbone.Model({ slug: slugs.SAVE_SEARCHES })
+            );
             collection = new Backbone.Collection(settings);
             settingsView = hqImport("cloudcare/js/formplayer/layout/views/settings").SettingsView({
                 collection: collection,

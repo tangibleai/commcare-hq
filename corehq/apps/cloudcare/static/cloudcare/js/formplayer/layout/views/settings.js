@@ -112,6 +112,34 @@ hqDefine("cloudcare/js/formplayer/layout/views/settings", function () {
         },
     });
 
+    /**
+     * Sets whether or not searches should be sticky, for both case lists and case claim.
+     * Available in both app preview and web apps.
+     */
+    var StickySearchesView = Marionette.View.extend({
+        template: _.template($("#sticky-searches-setting-template").html() || ""),
+        tagName: 'tr',
+        initialize: function () {
+            this.currentUser = FormplayerFrontend.getChannel().request('currentUser');
+        },
+        ui: {
+            stickySearches: '.js-sticky-searches',
+        },
+        events: {
+            'switchChange.bootstrapSwitch @ui.stickySearches': 'onChangeStickySearches',
+        },
+        onRender: function () {
+            this.ui.stickySearches.bootstrapSwitch(
+                'state',
+                this.currentUser.displayOptions.stickySearches
+            );
+        },
+        onChangeStickySearches: function (e, switchValue) {
+            this.currentUser.displayOptions.stickySearches = switchValue;
+            Util.saveDisplayOptions(this.currentUser.displayOptions);
+        },
+    });
+
     var SettingsView = Marionette.CollectionView.extend({
         childViewContainer: 'tbody',
         childView: function (item) {
@@ -123,6 +151,8 @@ hqDefine("cloudcare/js/formplayer/layout/views/settings", function () {
                 return ClearUserDataView;
             } else if (item.get('slug') === slugs.BREAK_LOCKS) {
                 return BreakLocksView;
+            } else if (item.get('slug') === slugs.STICKY_SEARCHES) {
+                return StickySearchesView;
             }
         },
         ui: {
