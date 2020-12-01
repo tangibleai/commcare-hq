@@ -7,6 +7,7 @@ from xml.sax.saxutils import unescape
 
 import attr
 
+from casexml.apps.case.exceptions import PhoneDateValueError
 from casexml.apps.case.xform import get_case_ids_from_form
 from casexml.apps.stock.const import TRANSACTION_TYPE_STOCKONHAND
 from casexml.apps.stock.models import StockTransaction
@@ -538,6 +539,9 @@ def is_orphaned_case(couch_case):
             return case_id in get_case_ids_from_form(form)
         except MissingFormXml:
             return True  # assume case is referenced if form XML is missing
+        except PhoneDateValueError:
+            # HACK for iso8601.ParseError: Unable to parse date string ...
+            return case_id in form.get_xml().decode('utf-8')
 
     case_id = couch_case["_id"]
     return not any(references_case(x) for x in couch_case["xform_ids"])
